@@ -1,0 +1,14 @@
+Compilation disassembly viewer for Vim
+--------------------------------------
+
+To use it:
+
+  git clone https://github.com/sgraham/whodis.git ~/.vim
+
+And add:
+
+  set runtimepath^=~/.vim/whodis
+
+to your .vimrc.
+
+Then, push Ctrl-F11 to view disassembly for the current function.
