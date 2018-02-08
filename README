@@ -11,4 +11,4 @@ And add:
 
 to your .vimrc.
 
-Then, push Ctrl-F11 to view disassembly for the current function.
+Then, push F11 to view disassembly for the current function.
