@@ -168,7 +168,7 @@ cwd, command, output = compdb[name]
 output_to_find = os.path.relpath(output, cwd)
 temp_asm = os.path.join(cwd, 'whodis.temp.S')
 command_to_run = command.replace(output_to_find, temp_asm) + \
-                 ' -S -g -masm=intel -fverbose-asm'
+                 ' -S -g -masm=intel'
 subprocess.check_call(shlex.split(command_to_run), cwd=cwd)
 
 with open(temp_asm, 'rb') as f:
