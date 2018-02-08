@@ -12,6 +12,7 @@ endif
 python <<endpython
 import json
 import os
+import re
 import shlex
 import subprocess
 
@@ -112,6 +113,43 @@ def EnsureScratchBufferOpen():
   return vim.buffers[find_in_buffers()]
 
 
+def DropMiscDirectives(contents):
+  return [x for x in contents if not x.startswith('\t.cfi') and
+                                 not x.startswith('\t##DEBUG_VALUE') and
+                                 not re.match('Lcfi\d+:', x) and
+                                 not re.match('Ltmp\d+:', x)]
+
+
+def GetFileNameAndLineNumber(file_and_line_with_colons):
+  """ '../../stuff.cc:42:3' -> ('../../stuff.cc', '42')
+  """
+  parts = file_and_line_with_colons.split(':')
+  return parts[0], parts[1]
+
+
+def GetSourceLine(cwd, file_name, line_number):
+  # TODO: cache contents.
+  with open(os.path.join(cwd, file_name), 'rb') as f:
+    return f.readlines()[int(line_number) - 1]
+
+
+def ReplaceLocWithCode(cwd, contents):
+  result = []
+  last_line = -1
+  for line in contents:
+    if line.startswith('\t.loc\t'):
+      trailing_filename = line[line.find('##'):]
+      file_name, line_number = GetFileNameAndLineNumber(trailing_filename[3:])
+      if line_number != last_line:
+        result.append('## ' + file_name + ':' + line_number)
+        if line_number != '0':
+          result.append('## ' + GetSourceLine(cwd, file_name, line_number))
+        last_line = line_number
+    else:
+      result.append(line)
+  return result
+
+
 endpython
 
 
@@ -129,7 +167,8 @@ cwd, command, output = compdb[name]
 # for what we want to do here.
 output_to_find = os.path.relpath(output, cwd)
 temp_asm = os.path.join(cwd, 'whodis.temp.S')
-command_to_run = command.replace(output_to_find, temp_asm) + ' -S'
+command_to_run = command.replace(output_to_find, temp_asm) + \
+                 ' -S -g -masm=intel -fverbose-asm'
 subprocess.check_call(shlex.split(command_to_run), cwd=cwd)
 
 with open(temp_asm, 'rb') as f:
@@ -146,7 +185,9 @@ function_start = FindFunctionStart(asm_contents, line_index)
 function_end = FindFunctionEnd(asm_contents, line_index)
 
 buf = EnsureScratchBufferOpen()
-buf[:] = asm_contents[function_start:function_end + 1]
+contents = DropMiscDirectives(asm_contents[function_start:function_end + 1])
+contents = ReplaceLocWithCode(cwd, contents)
+buf[:] = contents
 endpython
 
 endfunction
@@ -157,12 +198,13 @@ function! s:MarkBufferAsScratch()
     setlocal noswapfile
     setlocal buflisted
     setlocal ft=asm
+    setlocal ts=8
     map <silent> <nowait> <buffer> <Esc> :bd<cr>
-    map <silent> <nowait> <buffer> <C-F11> :bd<cr>
+    map <silent> <nowait> <buffer> <F11> :bd<cr>
 endfunction
 
 autocmd BufNewFile,BufEnter __whodis_asm_viewer__ call s:MarkBufferAsScratch()
 
 if !exists('g:who_no_maps')
-  map <silent> <C-F11> :call WhoDis()<cr>
+  map <silent> <F11> :call WhoDis()<cr>
 endif
