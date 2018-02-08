@@ -138,12 +138,12 @@ def ReplaceLocWithCode(cwd, contents):
   last_line = -1
   for line in contents:
     if line.startswith('\t.loc\t'):
-      trailing_filename = line[line.find('##'):]
-      file_name, line_number = GetFileNameAndLineNumber(trailing_filename[3:])
+      trailing_filename = line[line.find('#'):].lstrip('# ')
+      file_name, line_number = GetFileNameAndLineNumber(trailing_filename)
       if line_number != last_line:
-        result.append('## ' + file_name + ':' + line_number)
+        result.append('# ' + file_name + ':' + line_number)
         if line_number != '0':
-          result.append('## ' + GetSourceLine(cwd, file_name, line_number))
+          result.append('# ' + GetSourceLine(cwd, file_name, line_number))
         last_line = line_number
     else:
       result.append(line)
