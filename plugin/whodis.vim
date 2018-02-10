@@ -179,13 +179,12 @@ def ReplaceLocWithCode(cwd, contents, tu_index):
 
 
 def AssignOriginalColours(colour_map):
-  print colour_map
   for line_number, group in colour_map.iteritems():
     if group == -1:
       continue
     group %= 12
     vim.command('syntax match WhodisLineGroup' + str(group) +
-                ' /\%' + str(line_index + 1) + 'l\t.*/')
+                ' /\%' + str(line_number) + 'l./')
 
 
 def AssignDisasmColours(contents):
@@ -206,6 +205,22 @@ def GetDesiredLine():
     # relying on hitting a used line number.
     raise ValueError('Did not find any code for line ' + str(cursor_line))
   return line_index
+
+
+def CreateHighlightGroups():
+  # http://colorbrewer2.org/?type=qualitative&scheme=Set3&n=12
+  vim.command('highlight WhodisLineGroup0 guibg=#8dd3c7 guifg=black')
+  vim.command('highlight WhodisLineGroup1 guibg=#ffffb3 guifg=black')
+  vim.command('highlight WhodisLineGroup2 guibg=#bebada guifg=black')
+  vim.command('highlight WhodisLineGroup3 guibg=#fb8072 guifg=black')
+  vim.command('highlight WhodisLineGroup4 guibg=#80b1d3 guifg=black')
+  vim.command('highlight WhodisLineGroup5 guibg=#fdb462 guifg=black')
+  vim.command('highlight WhodisLineGroup6 guibg=#b3de69 guifg=black')
+  vim.command('highlight WhodisLineGroup7 guibg=#fccde5 guifg=black')
+  vim.command('highlight WhodisLineGroup8 guibg=#d9d9d9 guifg=black')
+  vim.command('highlight WhodisLineGroup9 guibg=#bc80bd guifg=black')
+  vim.command('highlight WhodisLineGroup10 guibg=#ccebc5 guifg=black')
+  vim.command('highlight WhodisLineGroup11 guibg=#ffed6f guifg=black')
 
 
 def Whodis():
@@ -237,6 +252,9 @@ def Whodis():
   contents = DropMiscDirectives(asm_contents[function_start:function_end + 1])
   contents, colour_map = ReplaceLocWithCode(cwd, contents, tu_index)
 
+  vim.command('syn on')
+
+  CreateHighlightGroups()
   AssignOriginalColours(colour_map)
 
   buf = EnsureScratchBufferOpen()
@@ -248,24 +266,10 @@ def Whodis():
   buf.options['modifiable'] = True
   buf[:] = [x[0] for x in contents]
   buf.options['modifiable'] = False
-  vim.command('syn on')
+  vim.command('map <silent> <nowait> <buffer> <Esc> :bd<cr>:syn on<cr>')
+  vim.command('map <silent> <nowait> <buffer> <F11> :bd<cr>:syn on<cr>')
 
-  # http://colorbrewer2.org/?type=qualitative&scheme=Set3&n=12
-  vim.command('highlight WhodisLineGroup0 guibg=#8dd3c7 guifg=black')
-  vim.command('highlight WhodisLineGroup1 guibg=#ffffb3 guifg=black')
-  vim.command('highlight WhodisLineGroup2 guibg=#bebada guifg=black')
-  vim.command('highlight WhodisLineGroup3 guibg=#fb8072 guifg=black')
-  vim.command('highlight WhodisLineGroup4 guibg=#80b1d3 guifg=black')
-  vim.command('highlight WhodisLineGroup5 guibg=#fdb462 guifg=black')
-  vim.command('highlight WhodisLineGroup6 guibg=#b3de69 guifg=black')
-  vim.command('highlight WhodisLineGroup7 guibg=#fccde5 guifg=black')
-  vim.command('highlight WhodisLineGroup8 guibg=#d9d9d9 guifg=black')
-  vim.command('highlight WhodisLineGroup9 guibg=#bc80bd guifg=black')
-  vim.command('highlight WhodisLineGroup10 guibg=#ccebc5 guifg=black')
-  vim.command('highlight WhodisLineGroup11 guibg=#ffed6f guifg=black')
-  vim.command('map <silent> <nowait> <buffer> <Esc> :bd<cr>')
-  vim.command('map <silent> <nowait> <buffer> <F11> :bd<cr>')
-
+  CreateHighlightGroups()
   AssignDisasmColours(contents)
 
 endpython
