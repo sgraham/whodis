@@ -137,7 +137,7 @@ def GetFileNameAndLineNumber(file_and_line_with_colons):
 
 
 def GetSourceLine(cwd, file_name, line_number):
-  # TODO: cache contents.
+  # TODO: Cache contents, maybe.
   with open(os.path.join(cwd, file_name), 'rb') as f:
     return f.readlines()[int(line_number) - 1].rstrip()
 
@@ -226,8 +226,13 @@ def CreateHighlightGroups():
   vim.command('highlight WhodisLineGroup11 guibg=#ffed6f guifg=black')
 
 
+def CloseWhodis():
+  pass
+
+
 def Whodis():
-  # TODO: Toggle off if on.
+  # TODO: Toggle if already open.
+  # vim.command('map <silent> <F11> :py CloseWhodis()<cr>')
 
   name = vim.current.buffer.name
   compdb = LoadCompdb(FindCompdbForFile(name))
@@ -283,6 +288,4 @@ def Whodis():
   vim.command(str(scratch_window_number) + 'wincmd w')
 endpython
 
-if !exists('g:who_no_maps')
-  map <silent> <F11> :python Whodis()<cr>
-endif
+map <silent> <F11> :python Whodis()<cr>
