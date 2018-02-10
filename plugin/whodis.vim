@@ -116,7 +116,12 @@ def EnsureScratchBufferOpen():
 
 def DropMiscDirectives(contents):
   return [x for x in contents if not x.startswith('\t.cfi') and
-                                 '#DEBUG_VALUE' not in x and
+                                 not x.startswith('\t.file') and
+                                 not x.startswith('\t.p2') and
+                                 not x.startswith('\t.globl') and
+                                 not x.startswith('\t.weak_definition') and
+                                 not x.startswith('\t#') and
+                                 not x.startswith('##') and
                                  not re.match('Lcfi\d+:', x) and
                                  not re.match('Ltmp\d+:', x)]
 
@@ -131,12 +136,12 @@ def GetFileNameAndLineNumber(file_and_line_with_colons):
 def GetSourceLine(cwd, file_name, line_number):
   # TODO: cache contents.
   with open(os.path.join(cwd, file_name), 'rb') as f:
-    return f.readlines()[int(line_number) - 1]
+    return f.readlines()[int(line_number) - 1].rstrip()
 
 
-def ReplaceLocWithCode(cwd, contents):
+def ReplaceLocWithCode(cwd, contents, tu_index):
   """Adds the original code after a line containing a source line indication.
-  Returned lines are tuples of (text, colour ident).
+  Returned lines are tuples of (text, colour ident), and the line->colour map.
   """
   result = []
   last_line = -1
@@ -156,25 +161,51 @@ def ReplaceLocWithCode(cwd, contents):
         colour_counter += 1
 
       if line_number != last_line:
-        result.append(('# ' + file_name + ':' + line_number, -1))
+        suffix = '  // ' + file_name + ':' + line_number
         if line_number != '0':
-          result.append(('# ' + GetSourceLine(cwd, file_name, line_number), -1))
+          result.append(('# ' +
+                         GetSourceLine(cwd, file_name, line_number) +
+                         suffix,
+                        -1))
+        else:
+          result.append(('# ' + file_name + ':' + line_number, -1))
         last_line = line_number
     else:
       if line.startswith('\t.'):
         result.append((line, -1))
       else:
         result.append((line, current_colour))
-  return result
+  return result, colour_mapping
 
 
-def AssignColours(contents):
+def AssignOriginalColours(colour_map):
+  print colour_map
+  for line_number, group in colour_map.iteritems():
+    if group == -1:
+      continue
+    group %= 12
+    vim.command('syntax match WhodisLineGroup' + str(group) +
+                ' /\%' + str(line_index + 1) + 'l\t.*/')
+
+
+def AssignDisasmColours(contents):
   for line_index, (_, group) in enumerate(contents):
     if group == -1:
       continue
     group %= 12
     vim.command('syntax match WhodisLineGroup' + str(group) +
                 ' /\%' + str(line_index + 1) + 'l\t.*/')
+
+
+def GetDesiredLine():
+  cursor_line = vim.current.window.cursor[0]
+  line_index = FindLineContainingCursor(asm_contents, tu_index, cursor_line)
+  if not line_index:
+    # TODO: Maybe something smarter here. [m doesn't work too well,
+    # but maybe some sort of parsing out of a current function name  rather than
+    # relying on hitting a used line number.
+    raise ValueError('Did not find any code for line ' + str(cursor_line))
+  return line_index
 
 
 def Whodis():
@@ -198,17 +229,17 @@ def Whodis():
   file_lines = [x[7:] for x in asm_contents if x.startswith('\t.file\t')]
   tu_index = FindIndexForFile(cwd, file_lines, name)
 
-  cursor_line = vim.current.window.cursor[0]
-  line_index = FindLineContainingCursor(asm_contents, tu_index, cursor_line)
-  if not line_index:
-    raise ValueError('Did not find any code for line ' + str(cursor_line))
+  line_index = GetDesiredLine()
 
   function_start = FindFunctionStart(asm_contents, line_index)
   function_end = FindFunctionEnd(asm_contents, line_index)
 
-  buf = EnsureScratchBufferOpen()
   contents = DropMiscDirectives(asm_contents[function_start:function_end + 1])
-  contents = ReplaceLocWithCode(cwd, contents)
+  contents, colour_map = ReplaceLocWithCode(cwd, contents, tu_index)
+
+  AssignOriginalColours(colour_map)
+
+  buf = EnsureScratchBufferOpen()
   buf.options['buftype'] = 'nofile'
   buf.options['bufhidden'] = 'hide'
   buf.options['swapfile'] = False
@@ -235,7 +266,7 @@ def Whodis():
   vim.command('map <silent> <nowait> <buffer> <Esc> :bd<cr>')
   vim.command('map <silent> <nowait> <buffer> <F11> :bd<cr>')
 
-  AssignColours(contents)
+  AssignDisasmColours(contents)
 
 endpython
 
