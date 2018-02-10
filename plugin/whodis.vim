@@ -64,7 +64,7 @@ def FindIndexForFile(cwd, file_directives, filename):
 
 
 def FindLineContainingCursor(asm_contents, tu_index, line_number):
-  prefix = '\t.loc\t' + tu_index + ' ' + str(line_number)
+  prefix = '\t.loc\t' + tu_index + ' ' + str(line_number) + ' '
   for i, line in enumerate(asm_contents):
     if line.startswith(prefix):
       return i
@@ -85,6 +85,7 @@ def FindFunctionEnd(asm_contents, start_index):
 
 
 def EnsureScratchBufferOpen():
+  original_window_index = vim.current.window.number
   TEMP_BUFFER_NAME = '__whodis_asm_viewer__'
   def find_in_buffers():
     for b in vim.buffers:
@@ -111,7 +112,9 @@ def EnsureScratchBufferOpen():
     else:
       buf_num = find_in_buffers()
       vim.command('vsplit +buffer' + str(buf_num))
-  return vim.buffers[find_in_buffers()]
+  return (vim.buffers[find_in_buffers()],
+          vim.current.window.number,
+          original_window_index)
 
 
 def DropMiscDirectives(contents):
@@ -184,7 +187,7 @@ def AssignOriginalColours(colour_map):
       continue
     group %= 12
     vim.command('syntax match WhodisLineGroup' + str(group) +
-                ' /\%' + str(line_number) + 'l./')
+                ' /\%' + str(line_number) + 'l./ containedin=ALL contained')
 
 
 def AssignDisasmColours(contents):
@@ -196,7 +199,7 @@ def AssignDisasmColours(contents):
                 ' /\%' + str(line_index + 1) + 'l\t.*/')
 
 
-def GetDesiredLine():
+def GetDesiredLine(asm_contents, tu_index):
   cursor_line = vim.current.window.cursor[0]
   line_index = FindLineContainingCursor(asm_contents, tu_index, cursor_line)
   if not line_index:
@@ -244,7 +247,7 @@ def Whodis():
   file_lines = [x[7:] for x in asm_contents if x.startswith('\t.file\t')]
   tu_index = FindIndexForFile(cwd, file_lines, name)
 
-  line_index = GetDesiredLine()
+  line_index = GetDesiredLine(asm_contents, tu_index)
 
   function_start = FindFunctionStart(asm_contents, line_index)
   function_end = FindFunctionEnd(asm_contents, line_index)
@@ -252,17 +255,17 @@ def Whodis():
   contents = DropMiscDirectives(asm_contents[function_start:function_end + 1])
   contents, colour_map = ReplaceLocWithCode(cwd, contents, tu_index)
 
-  vim.command('syn on')
-
   CreateHighlightGroups()
   AssignOriginalColours(colour_map)
+  vim.command('syn sync fromstart')
 
-  buf = EnsureScratchBufferOpen()
+  buf, scratch_window_number, original_window_number = EnsureScratchBufferOpen()
   buf.options['buftype'] = 'nofile'
   buf.options['bufhidden'] = 'hide'
   buf.options['swapfile'] = False
   buf.options['ts'] = 8
   buf.options['ft'] = 'asm'
+  vim.command('syn on')
   buf.options['modifiable'] = True
   buf[:] = [x[0] for x in contents]
   buf.options['modifiable'] = False
@@ -272,6 +275,12 @@ def Whodis():
   CreateHighlightGroups()
   AssignDisasmColours(contents)
 
+  vim.command(str(original_window_number) + 'wincmd w')
+  CreateHighlightGroups()
+  AssignOriginalColours(colour_map)
+  vim.command('syn sync fromstart')
+
+  vim.command(str(scratch_window_number) + 'wincmd w')
 endpython
 
 if !exists('g:who_no_maps')
