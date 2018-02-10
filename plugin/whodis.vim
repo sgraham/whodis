@@ -15,6 +15,7 @@ import os
 import re
 import shlex
 import subprocess
+import vim
 
 def FindCompdbForFile(f):
   """
@@ -115,7 +116,7 @@ def EnsureScratchBufferOpen():
 
 def DropMiscDirectives(contents):
   return [x for x in contents if not x.startswith('\t.cfi') and
-                                 not x.startswith('\t##DEBUG_VALUE') and
+                                 '#DEBUG_VALUE' not in x and
                                  not re.match('Lcfi\d+:', x) and
                                  not re.match('Ltmp\d+:', x)]
 
@@ -134,77 +135,110 @@ def GetSourceLine(cwd, file_name, line_number):
 
 
 def ReplaceLocWithCode(cwd, contents):
+  """Adds the original code after a line containing a source line indication.
+  Returned lines are tuples of (text, colour ident).
+  """
   result = []
   last_line = -1
+  colour_counter = 0
+  colour_mapping = {}
+  current_colour = -1
   for line in contents:
     if line.startswith('\t.loc\t'):
       trailing_filename = line[line.find('#'):].lstrip('# ')
       file_name, line_number = GetFileNameAndLineNumber(trailing_filename)
+
+      if line_number in colour_mapping:
+        current_colour = colour_mapping[line_number]
+      else:
+        colour_mapping[line_number] = colour_counter
+        current_colour = colour_counter
+        colour_counter += 1
+
       if line_number != last_line:
-        result.append('# ' + file_name + ':' + line_number)
+        result.append(('# ' + file_name + ':' + line_number, -1))
         if line_number != '0':
-          result.append('# ' + GetSourceLine(cwd, file_name, line_number))
+          result.append(('# ' + GetSourceLine(cwd, file_name, line_number), -1))
         last_line = line_number
     else:
-      result.append(line)
+      if line.startswith('\t.'):
+        result.append((line, -1))
+      else:
+        result.append((line, current_colour))
   return result
 
 
+def AssignColours(contents):
+  for line_index, (_, group) in enumerate(contents):
+    if group == -1:
+      continue
+    group %= 12
+    vim.command('syntax match WhodisLineGroup' + str(group) +
+                ' /\%' + str(line_index + 1) + 'l\t.*/')
+
+
+def Whodis():
+  # TODO: Toggle off if on.
+
+  name = vim.current.buffer.name
+  compdb = LoadCompdb(FindCompdbForFile(name))
+  cwd, command, output = compdb[name]
+
+  # Hackity hack to blah.o.S and append -S assuming that'll get us asm.
+  # Another way might be to use gobjdump -S, but it seems like not perfect output
+  # for what we want to do here.
+  output_to_find = os.path.relpath(output, cwd)
+  temp_asm = os.path.join(cwd, 'whodis.temp.S')
+  command_to_run = command.replace(output_to_find, temp_asm) + \
+                  ' -S -g -masm=intel'
+  subprocess.check_call(shlex.split(command_to_run), cwd=cwd)
+
+  with open(temp_asm, 'rb') as f:
+    asm_contents = f.readlines()
+  file_lines = [x[7:] for x in asm_contents if x.startswith('\t.file\t')]
+  tu_index = FindIndexForFile(cwd, file_lines, name)
+
+  cursor_line = vim.current.window.cursor[0]
+  line_index = FindLineContainingCursor(asm_contents, tu_index, cursor_line)
+  if not line_index:
+    raise ValueError('Did not find any code for line ' + str(cursor_line))
+
+  function_start = FindFunctionStart(asm_contents, line_index)
+  function_end = FindFunctionEnd(asm_contents, line_index)
+
+  buf = EnsureScratchBufferOpen()
+  contents = DropMiscDirectives(asm_contents[function_start:function_end + 1])
+  contents = ReplaceLocWithCode(cwd, contents)
+  buf.options['buftype'] = 'nofile'
+  buf.options['bufhidden'] = 'hide'
+  buf.options['swapfile'] = False
+  buf.options['ts'] = 8
+  buf.options['ft'] = 'asm'
+  buf.options['modifiable'] = True
+  buf[:] = [x[0] for x in contents]
+  buf.options['modifiable'] = False
+  vim.command('syn on')
+
+  # http://colorbrewer2.org/?type=qualitative&scheme=Set3&n=12
+  vim.command('highlight WhodisLineGroup0 guibg=#8dd3c7 guifg=black')
+  vim.command('highlight WhodisLineGroup1 guibg=#ffffb3 guifg=black')
+  vim.command('highlight WhodisLineGroup2 guibg=#bebada guifg=black')
+  vim.command('highlight WhodisLineGroup3 guibg=#fb8072 guifg=black')
+  vim.command('highlight WhodisLineGroup4 guibg=#80b1d3 guifg=black')
+  vim.command('highlight WhodisLineGroup5 guibg=#fdb462 guifg=black')
+  vim.command('highlight WhodisLineGroup6 guibg=#b3de69 guifg=black')
+  vim.command('highlight WhodisLineGroup7 guibg=#fccde5 guifg=black')
+  vim.command('highlight WhodisLineGroup8 guibg=#d9d9d9 guifg=black')
+  vim.command('highlight WhodisLineGroup9 guibg=#bc80bd guifg=black')
+  vim.command('highlight WhodisLineGroup10 guibg=#ccebc5 guifg=black')
+  vim.command('highlight WhodisLineGroup11 guibg=#ffed6f guifg=black')
+  vim.command('map <silent> <nowait> <buffer> <Esc> :bd<cr>')
+  vim.command('map <silent> <nowait> <buffer> <F11> :bd<cr>')
+
+  AssignColours(contents)
+
 endpython
-
-
-function! WhoDis()
-
-python <<endpython
-import vim
-
-name = vim.current.buffer.name
-compdb = LoadCompdb(FindCompdbForFile(name))
-cwd, command, output = compdb[name]
-
-# Hackity hack to blah.o.S and append -S assuming that'll get us asm.
-# Another way might be to use gobjdump -S, but it seems like not perfect output
-# for what we want to do here.
-output_to_find = os.path.relpath(output, cwd)
-temp_asm = os.path.join(cwd, 'whodis.temp.S')
-command_to_run = command.replace(output_to_find, temp_asm) + \
-                 ' -S -g -masm=intel'
-subprocess.check_call(shlex.split(command_to_run), cwd=cwd)
-
-with open(temp_asm, 'rb') as f:
-  asm_contents = f.readlines()
-file_lines = [x[7:] for x in asm_contents if x.startswith('\t.file\t')]
-tu_index = FindIndexForFile(cwd, file_lines, name)
-
-cursor_line = vim.current.window.cursor[0]
-line_index = FindLineContainingCursor(asm_contents, tu_index, cursor_line)
-if not line_index:
-  raise ValueError('Did not find any code for line ' + str(cursor_line))
-
-function_start = FindFunctionStart(asm_contents, line_index)
-function_end = FindFunctionEnd(asm_contents, line_index)
-
-buf = EnsureScratchBufferOpen()
-contents = DropMiscDirectives(asm_contents[function_start:function_end + 1])
-contents = ReplaceLocWithCode(cwd, contents)
-buf[:] = contents
-endpython
-
-endfunction
-
-function! s:MarkBufferAsScratch()
-    setlocal buftype=nofile
-    setlocal bufhidden=hide
-    setlocal noswapfile
-    setlocal buflisted
-    setlocal ft=asm
-    setlocal ts=8
-    map <silent> <nowait> <buffer> <Esc> :bd<cr>
-    map <silent> <nowait> <buffer> <F11> :bd<cr>
-endfunction
-
-autocmd BufNewFile,BufEnter __whodis_asm_viewer__ call s:MarkBufferAsScratch()
 
 if !exists('g:who_no_maps')
-  map <silent> <F11> :call WhoDis()<cr>
+  map <silent> <F11> :python Whodis()<cr>
 endif
