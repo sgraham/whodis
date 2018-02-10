@@ -227,12 +227,17 @@ def CreateHighlightGroups():
 
 
 def CloseWhodis():
-  pass
+  buf, scratch_window_number, original_window_number = EnsureScratchBufferOpen()
+  vim.command(str(scratch_window_number) + 'wincmd w')
+  vim.command('bd')
+  if scratch_window_number != original_window_number:
+    vim.command(str(original_window_number) + 'wincmd w')
+  vim.command('syn on')
+  vim.command('map <silent> <F11> :python Whodis()<cr>')
 
 
 def Whodis():
-  # TODO: Toggle if already open.
-  # vim.command('map <silent> <F11> :py CloseWhodis()<cr>')
+  vim.command('map <silent> <F11> :python CloseWhodis()<cr>')
 
   name = vim.current.buffer.name
   compdb = LoadCompdb(FindCompdbForFile(name))
@@ -274,8 +279,8 @@ def Whodis():
   buf.options['modifiable'] = True
   buf[:] = [x[0] for x in contents]
   buf.options['modifiable'] = False
-  vim.command('map <silent> <nowait> <buffer> <Esc> :bd<cr>:syn on<cr>')
-  vim.command('map <silent> <nowait> <buffer> <F11> :bd<cr>:syn on<cr>')
+  vim.command('map <silent> <nowait> <buffer> <Esc> :python CloseWhodis()<cr>')
+  vim.command('map <silent> <nowait> <buffer> <F11> :python CloseWhodis()<cr>')
 
   CreateHighlightGroups()
   AssignDisasmColours(contents)
