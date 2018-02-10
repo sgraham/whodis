@@ -237,8 +237,6 @@ def CloseWhodis():
 
 
 def Whodis():
-  vim.command('map <silent> <F11> :python CloseWhodis()<cr>')
-
   name = vim.current.buffer.name
   compdb = LoadCompdb(FindCompdbForFile(name))
   cwd, command, output = compdb[name]
@@ -259,15 +257,14 @@ def Whodis():
 
   line_index = GetDesiredLine(asm_contents, tu_index)
 
+  # Below GetDesiredLine() which raises if not found.
+  vim.command('map <silent> <F11> :python CloseWhodis()<cr>')
+
   function_start = FindFunctionStart(asm_contents, line_index)
   function_end = FindFunctionEnd(asm_contents, line_index)
 
   contents = DropMiscDirectives(asm_contents[function_start:function_end + 1])
   contents, colour_map = ReplaceLocWithCode(cwd, contents, tu_index)
-
-  CreateHighlightGroups()
-  AssignOriginalColours(colour_map)
-  vim.command('syn sync fromstart')
 
   buf, scratch_window_number, original_window_number = EnsureScratchBufferOpen()
   buf.options['buftype'] = 'nofile'
@@ -288,7 +285,10 @@ def Whodis():
   vim.command(str(original_window_number) + 'wincmd w')
   CreateHighlightGroups()
   AssignOriginalColours(colour_map)
-  vim.command('syn sync fromstart')
+  vim.command('syn clear cStatement cppStatement cString cCppString')
+  vim.command('syn clear cConditional cRepeat cStorageClass cppStorageClass')
+  vim.command('syn clear cType cOperator cLabel cppType cppBoolean')
+  vim.command('syn clear cConstant cppConstant')
 
   vim.command(str(scratch_window_number) + 'wincmd w')
 endpython
