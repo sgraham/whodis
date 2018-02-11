@@ -39,4 +39,4 @@ fiddle with the command for the file that you're investigating, e.g. `-O1` vs.
 
 ![Demo](demo.gif)
 
-Scott Graham <scott.whodis@h4ck3r.net>
+Scott Graham scott.whodis@h4ck3r.net
