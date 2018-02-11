@@ -33,7 +33,7 @@ If there's no code associated with the line the cursor was on when you pushed
 `F11`, it won't know what function you wanted. Jumping to the opening brace of
 the function with `[m` can be useful in that case.
 
-It's also sometimes interesting/useful to open up compile_commands.json and
+It's also sometimes interesting/useful to open up `compile_commands.json` and
 fiddle with the command for the file that you're investigating, e.g. `-O1` vs.
 `-O3`, or try different `-march=`.
 
