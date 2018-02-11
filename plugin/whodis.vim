@@ -122,11 +122,15 @@ def DropMiscDirectives(contents):
                                  not x.startswith('\t.file') and
                                  not x.startswith('\t.p2') and
                                  not x.startswith('\t.globl') and
+                                 not x.startswith('\t.type') and
+                                 not x.startswith('\t.size') and
                                  not x.startswith('\t.weak_definition') and
-                                 not x.startswith('\t#') and
+                                 not x.startswith('# %bb') and
                                  not x.startswith('##') and
+                                 not re.match('[ \t]*#', x) and
                                  not re.match('Lcfi\d+:', x) and
-                                 not re.match('Ltmp\d+:', x)]
+                                 not re.match('\.?Ltmp\d+:', x) and
+                                 not re.match('\.?Lfunc', x)]
 
 
 def GetFileNameAndLineNumber(file_and_line_with_colons):
@@ -212,18 +216,22 @@ def GetDesiredLine(asm_contents, tu_index):
 
 def CreateHighlightGroups():
   # http://colorbrewer2.org/?type=qualitative&scheme=Set3&n=12
-  vim.command('highlight WhodisLineGroup0 guibg=#8dd3c7 guifg=black')
-  vim.command('highlight WhodisLineGroup1 guibg=#ffffb3 guifg=black')
-  vim.command('highlight WhodisLineGroup2 guibg=#bebada guifg=black')
-  vim.command('highlight WhodisLineGroup3 guibg=#fb8072 guifg=black')
-  vim.command('highlight WhodisLineGroup4 guibg=#80b1d3 guifg=black')
-  vim.command('highlight WhodisLineGroup5 guibg=#fdb462 guifg=black')
-  vim.command('highlight WhodisLineGroup6 guibg=#b3de69 guifg=black')
-  vim.command('highlight WhodisLineGroup7 guibg=#fccde5 guifg=black')
-  vim.command('highlight WhodisLineGroup8 guibg=#d9d9d9 guifg=black')
-  vim.command('highlight WhodisLineGroup9 guibg=#bc80bd guifg=black')
-  vim.command('highlight WhodisLineGroup10 guibg=#ccebc5 guifg=black')
-  vim.command('highlight WhodisLineGroup11 guibg=#ffed6f guifg=black')
+  # Mapped to xterm256 via misc/map_to_xterm256.py.
+  def group(i, guibg, ctermbg):
+    vim.command('highlight WhodisLineGroup' + str(i) + ' guibg=#' + guibg +
+                ' guifg=black ctermbg=' + str(ctermbg) + ' ctermfg=0')
+  group(0, '8dd3c7', 116)
+  group(1, 'ffffb3', 229)
+  group(2, 'bebada', 146)
+  group(3, 'fb8072', 209)
+  group(4, '80b1d3', 110)
+  group(5, 'fdb462', 215)
+  group(6, 'b3de69', 149)
+  group(7, 'fccde5', 224)
+  group(8, 'd9d9d9', 253)
+  group(9, 'bc80bd', 139)
+  group(10, 'ccebc5', 188)
+  group(11, 'ffed6f', 227)
 
 
 def CloseWhodis():
@@ -271,16 +279,17 @@ def Whodis():
   buf.options['bufhidden'] = 'hide'
   buf.options['swapfile'] = False
   buf.options['ts'] = 8
-  buf.options['ft'] = 'asm'
-  vim.command('syn on')
   buf.options['modifiable'] = True
   buf[:] = [x[0] for x in contents]
   buf.options['modifiable'] = False
   vim.command('map <silent> <nowait> <buffer> <Esc> :python CloseWhodis()<cr>')
   vim.command('map <silent> <nowait> <buffer> <F11> :python CloseWhodis()<cr>')
 
+  buf.options['ft'] = 'asm'
+  vim.command('syn on')
   CreateHighlightGroups()
   AssignDisasmColours(contents)
+  buf.options['ft'] = ''
 
   vim.command(str(original_window_number) + 'wincmd w')
   CreateHighlightGroups()
