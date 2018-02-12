@@ -309,4 +309,9 @@ def Whodis():
   vim.command(str(scratch_window_number) + 'wincmd w')
 endpython
 
-map <silent> <F11> :python Whodis()<cr>
+if has('mac')
+  " F11 is a system shortcut on Mac, so bind to cmd-shift-a there.
+  map <silent> <D-A> :python Whodis()<cr>
+else
+  map <silent> <F11> :python Whodis()<cr>
+endif

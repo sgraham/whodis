@@ -22,6 +22,8 @@ something like:
 In Vim, push `F11` to view disassembly for the current function. Toggle it back
 off with `F11` or `Esc` in the disassembly window.
 
+On Mac, since `F11` is a system hotkey, use `Cmd-Shift-A` instead.
+
 Line attribution is done by colour, so you can visually see which lines
 correspond to which instructions. This works in GUI and xterm256.
 
@@ -29,8 +31,8 @@ A lot of directives and miscellaneous annotation is stripped out to try to make
 the disassembly more readable, so if you're looking for something more than just
 the instructions and control flow, prefer to inspect a raw .S directly.
 
-If there's no code associated with the line the cursor was on when you pushed
-`F11`, it won't know what function you wanted. Jumping to the opening brace of
+If there's no code associated with the line the cursor was on when you activate
+whodis, it won't know what function you wanted. Jumping to the opening brace of
 the function with `[m` can be useful in that case.
 
 It's also sometimes interesting/useful to open up `compile_commands.json` and
