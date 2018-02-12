@@ -46,7 +46,14 @@ def LoadCompdb(compdb_path):
   result = {}
   for c in commands:
     path = os.path.normpath(os.path.join(c['directory'], c['file']))
-    output = os.path.normpath(os.path.join(c['directory'], c['output']))
+    if 'output' in c:
+      output = os.path.normpath(os.path.join(c['directory'], c['output']))
+    else:
+      split_cmd = shlex.split(c['command'])
+      o_index = split_cmd.index('-o')
+      assert o_index != -1
+      output = os.path.normpath(
+          os.path.join(c['directory'], split_cmd[o_index + 1]))
     result[path] = c['directory'], c['command'], output
   return result
 
