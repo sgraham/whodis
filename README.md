@@ -5,7 +5,7 @@ Compilation disassembly viewer for Vim.
 
 To use it:
 
-    git clone https://github.com/sgraham/whodis.git ~/.vim
+    git clone https://github.com/sgraham/whodis.git ~/.vim/whodis
 
 And add:
 
