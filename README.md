@@ -19,10 +19,10 @@ something like:
 
     ninja -C out/Release -t compdb cc cxx > compile_commands.json
 
-In Vim, push `F11` to view disassembly for the current function. Toggle it back
-off with `F11` or `Esc` in the disassembly window.
-
-On Mac, since `F11` is a system hotkey, use `Cmd-Shift-A` instead.
+In Vim, push `Ctrl-Shift-A` to view disassembly for the current function. Toggle
+it back off with `Ctrl-Shift-A` again, in either the disassembly view or the
+original source file. On Mac, use `Cmd-Shift-A` instead. This mapping can be
+overridden by setting g:WhodisKey in your .vimrc.
 
 Line attribution is done by colour, so you can visually see which lines
 correspond to which instructions. This works in GUI and xterm256.

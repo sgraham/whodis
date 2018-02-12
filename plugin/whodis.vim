@@ -9,11 +9,12 @@ if !has('python')
   finish
 endif
 
-if has('mac')
-  " F11 is a system shortcut on Mac, so bind to cmd-shift-a there.
-  let WhodisKey = '<D-A>'
-else
-  let WhodisKey = '<F11>'
+if !exists("g:WhodisKey")
+  if has('mac')
+    let WhodisKey = '<D-A>'
+  else
+    let WhodisKey = '<C-S-A>'
+  endif
 endif
 
 python <<endpython
@@ -264,8 +265,8 @@ def Whodis():
   cwd, command, output = compdb[name]
 
   # Hackity hack to blah.o.S and append -S assuming that'll get us asm.
-  # Another way might be to use gobjdump -S, but it seems like not perfect output
-  # for what we want to do here.
+  # Another way might be to use gobjdump -S, but it seems like not perfect
+  # output for what we want to do here.
   output_to_find = os.path.relpath(output, cwd)
   temp_asm = os.path.join(cwd, 'whodis.temp.S')
   command_to_run = command.replace(output_to_find, temp_asm) + \
@@ -297,7 +298,6 @@ def Whodis():
   buf.options['modifiable'] = True
   buf[:] = [x[0] for x in contents]
   buf.options['modifiable'] = False
-  vim.command('map <silent> <nowait> <buffer> <Esc> :python CloseWhodis()<cr>')
   vim.command('map <silent> <nowait> <buffer> %s :python CloseWhodis()<cr>' %
                   whodis_key)
 
