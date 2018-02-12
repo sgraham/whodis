@@ -5,16 +5,20 @@
 " Scott Graham <scott.whodis@h4ck3r.net>
 
 if !has('python')
-  s:ErrMsg("Error: vim with +python required")
+  s:ErrMsg('Error: vim with +python required')
   finish
 endif
 
-if !exists("g:WhodisKey")
+if !exists('g:WhodisKey')
   if has('mac')
     let WhodisKey = '<D-A>'
   else
     let WhodisKey = '<C-S-A>'
   endif
+endif
+
+if !exists('g:WhodisFilterProgram')
+  let WhodisFilterProgram = ''
 endif
 
 python <<endpython
@@ -274,7 +278,7 @@ def Whodis():
   subprocess.check_call(shlex.split(command_to_run), cwd=cwd)
 
   with open(temp_asm, 'rb') as f:
-    asm_contents = f.readlines()
+    asm_contents = [x.rstrip() for x in f.readlines()]
   file_lines = [x[7:] for x in asm_contents if x.startswith('\t.file\t')]
   tu_index = FindIndexForFile(cwd, file_lines, name)
 
@@ -288,7 +292,14 @@ def Whodis():
   function_end = FindFunctionEnd(asm_contents, line_index)
 
   contents = DropMiscDirectives(asm_contents[function_start:function_end + 1])
-  contents, colour_map = ReplaceLocWithCode(cwd, contents, tu_index)
+
+  filter_prog = vim.eval('WhodisFilterProgram')
+  if filter_prog:
+    p = subprocess.Popen([filter_prog],
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    contents = p.communicate('\n'.join(contents))[0].splitlines(False)
+
+  contents_and_colours, colour_map = ReplaceLocWithCode(cwd, contents, tu_index)
 
   buf, scratch_window_number, original_window_number = EnsureScratchBufferOpen()
   buf.options['buftype'] = 'nofile'
@@ -296,7 +307,7 @@ def Whodis():
   buf.options['swapfile'] = False
   buf.options['ts'] = 8
   buf.options['modifiable'] = True
-  buf[:] = [x[0] for x in contents]
+  buf[:] = [x[0] for x in contents_and_colours]
   buf.options['modifiable'] = False
   vim.command('map <silent> <nowait> <buffer> %s :python CloseWhodis()<cr>' %
                   whodis_key)
@@ -304,7 +315,7 @@ def Whodis():
   buf.options['ft'] = 'asm'
   vim.command('syn on')
   CreateHighlightGroups()
-  AssignDisasmColours(contents)
+  AssignDisasmColours(contents_and_colours)
   buf.options['ft'] = ''
 
   vim.command(str(original_window_number) + 'wincmd w')
