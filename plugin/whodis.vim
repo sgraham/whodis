@@ -9,6 +9,13 @@ if !has('python')
   finish
 endif
 
+if has('mac')
+  " F11 is a system shortcut on Mac, so bind to cmd-shift-a there.
+  let WhodisKey = '<D-A>'
+else
+  let WhodisKey = '<F11>'
+endif
+
 python <<endpython
 import json
 import os
@@ -248,7 +255,7 @@ def CloseWhodis():
   if scratch_window_number != original_window_number:
     vim.command(str(original_window_number) + 'wincmd w')
   vim.command('syn on')
-  vim.command('map <silent> <F11> :python Whodis()<cr>')
+  vim.command('map <silent> %s :python Whodis()<cr>' % vim.eval('WhodisKey'))
 
 
 def Whodis():
@@ -273,7 +280,8 @@ def Whodis():
   line_index = GetDesiredLine(asm_contents, tu_index)
 
   # Below GetDesiredLine() which raises if not found.
-  vim.command('map <silent> <F11> :python CloseWhodis()<cr>')
+  whodis_key = vim.eval('WhodisKey')
+  vim.command('map <silent> %s :python CloseWhodis()<cr>' % whodis_key)
 
   function_start = FindFunctionStart(asm_contents, line_index)
   function_end = FindFunctionEnd(asm_contents, line_index)
@@ -290,7 +298,8 @@ def Whodis():
   buf[:] = [x[0] for x in contents]
   buf.options['modifiable'] = False
   vim.command('map <silent> <nowait> <buffer> <Esc> :python CloseWhodis()<cr>')
-  vim.command('map <silent> <nowait> <buffer> <F11> :python CloseWhodis()<cr>')
+  vim.command('map <silent> <nowait> <buffer> %s :python CloseWhodis()<cr>' %
+                  whodis_key)
 
   buf.options['ft'] = 'asm'
   vim.command('syn on')
@@ -309,9 +318,4 @@ def Whodis():
   vim.command(str(scratch_window_number) + 'wincmd w')
 endpython
 
-if has('mac')
-  " F11 is a system shortcut on Mac, so bind to cmd-shift-a there.
-  map <silent> <D-A> :python Whodis()<cr>
-else
-  map <silent> <F11> :python Whodis()<cr>
-endif
+execute 'map <silent>' . WhodisKey . ' :python Whodis()<cr>'
