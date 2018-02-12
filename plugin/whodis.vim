@@ -29,6 +29,8 @@ import shlex
 import subprocess
 import vim
 
+WhodisIsOpen = None
+
 def FindCompdbForFile(f):
   """
   '/Users/scottmg/work/crashpad/crashpad/test/mac/dyld.cc' -> 
@@ -108,36 +110,36 @@ def FindFunctionEnd(asm_contents, start_index):
 
 
 def EnsureScratchBufferOpen():
-  original_window_index = vim.current.window.number
+  original_window = vim.current.window
   TEMP_BUFFER_NAME = '__whodis_asm_viewer__'
   def find_in_buffers():
     for b in vim.buffers:
       if b.name.endswith(TEMP_BUFFER_NAME):
-        return b.number
-    return -1
+        return b
+    return None
 
   def find_in_windows():
     for w in vim.windows:
       if w.buffer.name.endswith(TEMP_BUFFER_NAME):
-        return w.number
-    return -1
+        return w
+    return None
 
   # Check if a buffer is already created.
-  buf_num = find_in_buffers()
-  if buf_num == -1:
+  buf = find_in_buffers()
+  if buf is not None:
     vim.command('vnew ' + TEMP_BUFFER_NAME)
   else:
     # Buffer is already created, check if there's a window.
-    win_num = find_in_windows()
-    if win_num != -1:
+    win = find_in_windows()
+    if win is not None:
       # Jump to it if it exists.
-      vim.command(str(win_num) + 'wincmd w')
+      vim.current.window = win
     else:
-      buf_num = find_in_buffers()
-      vim.command('vsplit +buffer' + str(buf_num))
-  return (vim.buffers[find_in_buffers()],
-          vim.current.window.number,
-          original_window_index)
+      buf = find_in_buffers()
+      vim.command('vsplit +buffer' + str(buf.number))
+  return (find_in_buffers(),
+          vim.current.window,
+          original_window)
 
 
 def DropMiscDirectives(contents):
@@ -181,9 +183,13 @@ def ReplaceLocWithCode(cwd, contents, tu_index):
   for line in contents:
     if line.startswith('\t.loc\t'):
       trailing_filename = line[line.find('#'):].lstrip('# ')
+      mo = re.match(r'\t\.loc\t(\d+)', line)
       file_name, line_number = GetFileNameAndLineNumber(trailing_filename)
 
-      if line_number in colour_mapping:
+      if mo and mo.group(1) != tu_index:
+        # If the .loc isn't in our file, don't colour it.
+        current_colour = -1
+      elif line_number in colour_mapping:
         current_colour = colour_mapping[line_number]
       else:
         colour_mapping[line_number] = colour_counter
@@ -257,17 +263,36 @@ def CreateHighlightGroups():
   group(11, 'ffed6f', 227)
 
 
-def CloseWhodis():
-  buf, scratch_window_number, original_window_number = EnsureScratchBufferOpen()
-  vim.command(str(scratch_window_number) + 'wincmd w')
-  vim.command('bd')
-  if scratch_window_number != original_window_number:
-    vim.command(str(original_window_number) + 'wincmd w')
-  vim.command('syn on')
-  vim.command('map <silent> %s :python Whodis()<cr>' % vim.eval('WhodisKey'))
-
-
 def Whodis():
+  """If not open, looks at current buffer/line and attempts to disasm that
+  function and display it in a new buffer. If it is open, closes the old buffer.
+  """
+
+  global WhodisIsOpen
+  if WhodisIsOpen:
+    # Restore the syntax highlighting on the original source window we overrode
+    # the highlighting on. Save the now-current window because we have to modify
+    # to the then-current one to `syn on`.
+    right_now_window = vim.current.window
+    try:
+      vim.current.window = WhodisIsOpen[1]
+      vim.command('syn on')
+    except vim.error:
+      # The window might have been deleted by the user.
+      pass
+    vim.current.window = right_now_window
+
+    # Destroy the scratch buffer.
+    try:
+      vim.command('bd! ' + str(WhodisIsOpen[0].number))
+    except:
+      # The buffer might have already been deleted by the user.
+      pass
+
+    # Remove the global that indicates that we were open.
+    WhodisIsOpen = None
+    return
+
   name = vim.current.buffer.name
   compdb = LoadCompdb(FindCompdbForFile(name))
   cwd, command, output = compdb[name]
@@ -289,15 +314,12 @@ def Whodis():
   line_index = GetDesiredLine(asm_contents, tu_index)
 
   # Below GetDesiredLine() which raises if not found.
-  whodis_key = vim.eval('WhodisKey')
-  vim.command('map <silent> %s :python CloseWhodis()<cr>' % whodis_key)
-
   function_start = FindFunctionStart(asm_contents, line_index)
   function_end = FindFunctionEnd(asm_contents, line_index)
 
   contents = DropMiscDirectives(asm_contents[function_start:function_end + 1])
 
-  filter_prog = vim.eval('WhodisFilterProgram')
+  filter_prog = vim.vars['WhodisFilterProgram']
   if filter_prog:
     p = subprocess.Popen([filter_prog],
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -305,7 +327,7 @@ def Whodis():
 
   contents_and_colours, colour_map = ReplaceLocWithCode(cwd, contents, tu_index)
 
-  buf, scratch_window_number, original_window_number = EnsureScratchBufferOpen()
+  buf, scratch_window, original_window = EnsureScratchBufferOpen()
   buf.options['buftype'] = 'nofile'
   buf.options['bufhidden'] = 'hide'
   buf.options['swapfile'] = False
@@ -313,8 +335,6 @@ def Whodis():
   buf.options['modifiable'] = True
   buf[:] = [x[0] for x in contents_and_colours]
   buf.options['modifiable'] = False
-  vim.command('map <silent> <nowait> <buffer> %s :python CloseWhodis()<cr>' %
-                  whodis_key)
 
   buf.options['ft'] = 'asm'
   vim.command('syn on')
@@ -322,7 +342,7 @@ def Whodis():
   AssignDisasmColours(contents_and_colours)
   buf.options['ft'] = ''
 
-  vim.command(str(original_window_number) + 'wincmd w')
+  vim.current.window = original_window
   CreateHighlightGroups()
   AssignOriginalColours(colour_map)
   vim.command('syn clear cStatement cppStatement cString cCppString')
@@ -330,7 +350,10 @@ def Whodis():
   vim.command('syn clear cType cOperator cLabel cppType cppBoolean')
   vim.command('syn clear cConstant cppConstant')
 
-  vim.command(str(scratch_window_number) + 'wincmd w')
+  vim.current.window = scratch_window
+
+  # Save that we're open (existence), and original windows for fixup.
+  WhodisIsOpen = buf, original_window
 endpython
 
 execute 'map <silent>' . WhodisKey . ' :python Whodis()<cr>'
