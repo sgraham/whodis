@@ -91,14 +91,18 @@ def FindLineContainingCursor(asm_contents, tu_index, line_number):
 
 def FindFunctionStart(asm_contents, start_index):
   i = start_index - 1
-  while not asm_contents[i].startswith('\t.globl\t'):
+  while not asm_contents[i].startswith('Lfunc_begin'):
+    i -= 1
+  # After Lfunc_begin, try to walk back to actual function symbol.
+  i -= 1
+  while ':' not in asm_contents[i]:
     i -= 1
   return i
 
 
 def FindFunctionEnd(asm_contents, start_index):
   i = start_index + 1
-  while not asm_contents[i].startswith('\t.cfi_endproc'):
+  while not asm_contents[i].startswith('Lfunc_end'):
     i += 1
   return i
 
