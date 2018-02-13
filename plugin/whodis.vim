@@ -180,22 +180,23 @@ class SourceData(object):
     # Mapping from disassembly line indices (indexing contents) to the colouring
     # group to be used for that line. Note that these indices are 0-based as
     # normal Python, but Vim wants 1-based lines.
-    self.disasm_to_colour_index = []
+    self.disasm_to_colour_group = []
 
     # Mapping from disassembly line indices (indexing |contents|) to the source
     # line to which it corresponds. Note that these indices are 0-based as
     # normal Python, but Vim wants 1-based lines.
-    self.disasm_to_source_line = []
+    # (currently unused)
+    #self.disasm_to_source_line = []
 
     # Maps source line numbers to which colouring group to be used.
-    self.source_line_to_colour_index = {}
+    self.source_line_to_colour_group = {}
 
   def _AddLine(self, text, colour, line_number):
     self.contents.append(text)
-    self.disasm_to_colour_index.append(colour)
-    self.disasm_to_source_line.append(line_number)
-    assert len(self.contents) == len(self.disasm_to_colour_index)
-    assert len(self.contents) == len(self.disasm_to_source_line)
+    self.disasm_to_colour_group.append(colour)
+    #self.disasm_to_source_line.append(line_number)
+    assert len(self.contents) == len(self.disasm_to_colour_group)
+    #assert len(self.contents) == len(self.disasm_to_source_line)
 
 
 def _BuildSourceData(cwd, contents, tu_index):
@@ -215,10 +216,10 @@ def _BuildSourceData(cwd, contents, tu_index):
       if mo and mo.group(1) != tu_index:
         # If the .loc isn't in our file, don't colour it.
         current_colour = -1
-      elif line_number in sd.source_line_to_colour_index:
-        current_colour = sd.source_line_to_colour_index[line_number]
+      elif line_number in sd.source_line_to_colour_group:
+        current_colour = sd.source_line_to_colour_group[line_number]
       else:
-        sd.source_line_to_colour_index[line_number] = colour_counter
+        sd.source_line_to_colour_group[line_number] = colour_counter
         current_colour = colour_counter
         colour_counter += 1
 
@@ -240,19 +241,17 @@ def _BuildSourceData(cwd, contents, tu_index):
 
 
 def _AssignOriginalColours(source_data):
-  for line_number, group in source_data.source_line_to_colour_index.iteritems():
+  for line_number, group in source_data.source_line_to_colour_group.iteritems():
     if group == -1:
       continue
-    group %= 12
     vim.command('syntax match WhodisLineGroup' + str(group) +
                 ' /\%' + str(line_number) + 'l./ containedin=ALL contained')
 
 
 def _AssignDisasmColours(source_data):
-  for line_index, group in enumerate(source_data.disasm_to_colour_index):
+  for line_index, group in enumerate(source_data.disasm_to_colour_group):
     if group == -1:
       continue
-    group %= 12
     vim.command('syntax match WhodisLineGroup' + str(group) +
                 ' /\%' + str(line_index + 1) + 'l\t.*/')
 
@@ -268,25 +267,35 @@ def _GetDesiredLine(asm_contents, tu_index):
   return line_index
 
 
-def _CreateHighlightGroups(note_index=-1):
+def _CreateHighlightGroups(source_data, note_index=-1):
   # http://colorbrewer2.org/?type=qualitative&scheme=Set3&n=12
   # Mapped to xterm256 via misc/map_to_xterm256.py.
-  def group(i, guibg, ctermbg):
+  colours = [
+    ('8dd3c7', 116),
+    ('ffffb3', 229),
+    ('bebada', 146),
+    ('fb8072', 209),
+    ('80b1d3', 110),
+    ('fdb462', 215),
+    ('b3de69', 149),
+    ('fccde5', 224),
+    ('d9d9d9', 253),
+    ('bc80bd', 139),
+    ('ccebc5', 188),
+    ('ffed6f', 227),
+  ]
+
+  def make_group(i, guibg, ctermbg):
+    vim.command('highlight clear WhodisLineGroup' + str(i))
+    # TODO: bold looks better than underline, but requires that the font in use
+    # have a bold style, at least on Mac. Maybe an option to select underline
+    # instead of bold and/or disable this entirely.
     vim.command('highlight WhodisLineGroup' + str(i) + ' guibg=#' + guibg +
                 ' guifg=black ctermbg=' + str(ctermbg) + ' ctermfg=0' +
-                (' gui=underline term=underline' if note_index == i else ''))
-  group(0, '8dd3c7', 116)
-  group(1, 'ffffb3', 229)
-  group(2, 'bebada', 146)
-  group(3, 'fb8072', 209)
-  group(4, '80b1d3', 110)
-  group(5, 'fdb462', 215)
-  group(6, 'b3de69', 149)
-  group(7, 'fccde5', 224)
-  group(8, 'd9d9d9', 253)
-  group(9, 'bc80bd', 139)
-  group(10, 'ccebc5', 188)
-  group(11, 'ffed6f', 227)
+                (' gui=bold term=bold' if note_index == i else ''))
+  for line_number, group in source_data.source_line_to_colour_group.iteritems():
+    colour_index = group % len(colours)
+    make_group(group, colours[colour_index][0], colours[colour_index][1])
 
 
 def _UpdateSourceUnderlining():
@@ -295,22 +304,12 @@ def _UpdateSourceUnderlining():
     return
 
   cursor_line = vim.current.window.cursor[0]
-  print cursor_line, WhodisSourceData.disasm_to_source_line[cursor_line - 1]
-  # TODO: Set underline on the source file line that corresponds to the disasm
-  # where the cursor is. Currently, there's 12 highlight groups, so all lines
-  # corresponding to the same % 12 group would get underlined. Instead, make
-  # N groups with repeating colours so that underline can be set independently.
-  '''
+  colour_group = WhodisSourceData.disasm_to_colour_group[cursor_line - 1]
+
   right_now_window = vim.current.window
-
   vim.current.window = WhodisIsOpen[1]
-  if cursor_line not in WhodisSourceData.disasm_to_source_line:
-    WhodisIsOpen
-    _CreateHighlightGroups
-  print 'source line', WhodisSourceData.disasm_to_source_line[cursor_line - 1]
-
+  _CreateHighlightGroups(WhodisSourceData, colour_group)
   vim.current.window = right_now_window
-  '''
 
 
 def Whodis():
@@ -393,12 +392,12 @@ def Whodis():
 
   buf.options['ft'] = 'asm'
   vim.command('syn on')
-  _CreateHighlightGroups()
+  _CreateHighlightGroups(source_data)
   _AssignDisasmColours(source_data)
   buf.options['ft'] = ''
 
   vim.current.window = original_window
-  _CreateHighlightGroups()
+  _CreateHighlightGroups(source_data)
   _AssignOriginalColours(source_data)
   vim.command('syn clear cStatement cppStatement cString cCppString')
   vim.command('syn clear cConditional cRepeat cStorageClass cppStorageClass')
