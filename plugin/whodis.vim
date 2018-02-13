@@ -30,8 +30,9 @@ import subprocess
 import vim
 
 WhodisIsOpen = None
+WhodisSourceData = None
 
-def FindCompdbForFile(f):
+def _FindCompdbForFile(f):
   """
   '/Users/scottmg/work/crashpad/crashpad/test/mac/dyld.cc' -> 
   '/Users/scottmg/work/crashpad/crashpad/compile_commands.json'
@@ -54,7 +55,7 @@ def FindCompdbForFile(f):
     f = cur_dir
 
 
-def LoadCompdb(compdb_path):
+def _LoadCompdb(compdb_path):
   with open(compdb_path, 'rb') as f:
     commands = json.loads(f.read())
   result = {}
@@ -72,7 +73,7 @@ def LoadCompdb(compdb_path):
   return result
 
 
-def FindIndexForFile(cwd, file_directives, filename):
+def _FindIndexForFile(cwd, file_directives, filename):
   for line in file_directives:
     parts = shlex.split(line)
     if len(parts) < 3:
@@ -84,14 +85,14 @@ def FindIndexForFile(cwd, file_directives, filename):
   raise ValueError('Could not find TU for ' + filename)
 
 
-def FindLineContainingCursor(asm_contents, tu_index, line_number):
+def _FindLineContainingCursor(asm_contents, tu_index, line_number):
   prefix = '\t.loc\t' + tu_index + ' ' + str(line_number) + ' '
   for i, line in enumerate(asm_contents):
     if line.startswith(prefix):
       return i
 
 
-def FindFunctionStart(asm_contents, start_index):
+def _FindFunctionStart(asm_contents, start_index):
   i = start_index - 1
   while not asm_contents[i].startswith('Lfunc_begin'):
     i -= 1
@@ -102,14 +103,14 @@ def FindFunctionStart(asm_contents, start_index):
   return i
 
 
-def FindFunctionEnd(asm_contents, start_index):
+def _FindFunctionEnd(asm_contents, start_index):
   i = start_index + 1
   while not asm_contents[i].startswith('Lfunc_end'):
     i += 1
   return i
 
 
-def EnsureScratchBufferOpen():
+def _EnsureScratchBufferOpen():
   original_window = vim.current.window
   TEMP_BUFFER_NAME = '__whodis_asm_viewer__'
   def find_in_buffers():
@@ -142,7 +143,7 @@ def EnsureScratchBufferOpen():
           original_window)
 
 
-def DropMiscDirectives(contents):
+def _DropMiscDirectives(contents):
   return [x for x in contents if not x.startswith('\t.cfi') and
                                  not x.startswith('\t.file') and
                                  not x.startswith('\t.p2') and
@@ -158,64 +159,88 @@ def DropMiscDirectives(contents):
                                  not re.match('\.?Lfunc', x)]
 
 
-def GetFileNameAndLineNumber(file_and_line_with_colons):
+def _GetFileNameAndLineNumber(file_and_line_with_colons):
   """ '../../stuff.cc:42:3' -> ('../../stuff.cc', '42')
   """
   parts = file_and_line_with_colons.split(':')
   return parts[0], parts[1]
 
 
-def GetSourceLine(cwd, file_name, line_number):
+def _GetSourceLine(cwd, file_name, line_number):
   # TODO: Cache contents, maybe.
   with open(os.path.join(cwd, file_name), 'rb') as f:
     return f.readlines()[int(line_number) - 1].rstrip()
 
 
-def ReplaceLocWithCode(cwd, contents, tu_index):
-  """Adds the original code after a line containing a source line indication.
-  Returned lines are tuples of (text, colour ident), and the line->colour map.
+class SourceData(object):
+  def __init__(self):
+    # List of each line in the disassembly.
+    self.contents = []
+
+    # Mapping from disassembly line indices (indexing contents) to the colouring
+    # group to be used for that line. Note that these indices are 0-based as
+    # normal Python, but Vim wants 1-based lines.
+    self.disasm_to_colour_index = []
+
+    # Mapping from disassembly line indices (indexing |contents|) to the source
+    # line to which it corresponds. Note that these indices are 0-based as
+    # normal Python, but Vim wants 1-based lines.
+    self.disasm_to_source_line = []
+
+    # Maps source line numbers to which colouring group to be used.
+    self.source_line_to_colour_index = {}
+
+  def _AddLine(self, text, colour, line_number):
+    self.contents.append(text)
+    self.disasm_to_colour_index.append(colour)
+    self.disasm_to_source_line.append(line_number)
+    assert len(self.contents) == len(self.disasm_to_colour_index)
+    assert len(self.contents) == len(self.disasm_to_source_line)
+
+
+def _BuildSourceData(cwd, contents, tu_index):
+  """Takes the lightly filtered disasm and builds a SourceData describing what
+  to display, and how to display it.
   """
-  result = []
+  sd = SourceData()
   last_line = -1
   colour_counter = 0
-  colour_mapping = {}
   current_colour = -1
   for line in contents:
     if line.startswith('\t.loc\t'):
       trailing_filename = line[line.find('#'):].lstrip('# ')
       mo = re.match(r'\t\.loc\t(\d+)', line)
-      file_name, line_number = GetFileNameAndLineNumber(trailing_filename)
+      file_name, line_number = _GetFileNameAndLineNumber(trailing_filename)
 
       if mo and mo.group(1) != tu_index:
         # If the .loc isn't in our file, don't colour it.
         current_colour = -1
-      elif line_number in colour_mapping:
-        current_colour = colour_mapping[line_number]
+      elif line_number in sd.source_line_to_colour_index:
+        current_colour = sd.source_line_to_colour_index[line_number]
       else:
-        colour_mapping[line_number] = colour_counter
+        sd.source_line_to_colour_index[line_number] = colour_counter
         current_colour = colour_counter
         colour_counter += 1
 
       if line_number != last_line:
         suffix = '  // ' + file_name + ':' + line_number
         if line_number != '0':
-          result.append(('# ' +
-                         GetSourceLine(cwd, file_name, line_number) +
-                         suffix,
-                        -1))
+          sd._AddLine(
+              '# ' + _GetSourceLine(cwd, file_name, line_number) + suffix,
+              -1, line_number)
         else:
-          result.append(('# ' + file_name + ':' + line_number, -1))
+          sd._AddLine('# ' + file_name + ':' + line_number, -1, line_number)
         last_line = line_number
     else:
       if line.startswith('\t.'):
-        result.append((line, -1))
+        sd._AddLine(line, -1, -1)
       else:
-        result.append((line, current_colour))
-  return result, colour_mapping
+        sd._AddLine(line, current_colour, last_line)
+  return sd
 
 
-def AssignOriginalColours(colour_map):
-  for line_number, group in colour_map.iteritems():
+def _AssignOriginalColours(source_data):
+  for line_number, group in source_data.source_line_to_colour_index.iteritems():
     if group == -1:
       continue
     group %= 12
@@ -223,8 +248,8 @@ def AssignOriginalColours(colour_map):
                 ' /\%' + str(line_number) + 'l./ containedin=ALL contained')
 
 
-def AssignDisasmColours(contents):
-  for line_index, (_, group) in enumerate(contents):
+def _AssignDisasmColours(source_data):
+  for line_index, group in enumerate(source_data.disasm_to_colour_index):
     if group == -1:
       continue
     group %= 12
@@ -232,9 +257,9 @@ def AssignDisasmColours(contents):
                 ' /\%' + str(line_index + 1) + 'l\t.*/')
 
 
-def GetDesiredLine(asm_contents, tu_index):
+def _GetDesiredLine(asm_contents, tu_index):
   cursor_line = vim.current.window.cursor[0]
-  line_index = FindLineContainingCursor(asm_contents, tu_index, cursor_line)
+  line_index = _FindLineContainingCursor(asm_contents, tu_index, cursor_line)
   if not line_index:
     # TODO: Maybe something smarter here. [m doesn't work too well,
     # but maybe some sort of parsing out of a current function name  rather than
@@ -243,12 +268,13 @@ def GetDesiredLine(asm_contents, tu_index):
   return line_index
 
 
-def CreateHighlightGroups():
+def _CreateHighlightGroups(note_index=-1):
   # http://colorbrewer2.org/?type=qualitative&scheme=Set3&n=12
   # Mapped to xterm256 via misc/map_to_xterm256.py.
   def group(i, guibg, ctermbg):
     vim.command('highlight WhodisLineGroup' + str(i) + ' guibg=#' + guibg +
-                ' guifg=black ctermbg=' + str(ctermbg) + ' ctermfg=0')
+                ' guifg=black ctermbg=' + str(ctermbg) + ' ctermfg=0' +
+                (' gui=underline term=underline' if note_index == i else ''))
   group(0, '8dd3c7', 116)
   group(1, 'ffffb3', 229)
   group(2, 'bebada', 146)
@@ -263,12 +289,37 @@ def CreateHighlightGroups():
   group(11, 'ffed6f', 227)
 
 
+def _UpdateSourceUnderlining():
+  global WhodisSourceData
+  if not WhodisSourceData:
+    return
+
+  cursor_line = vim.current.window.cursor[0]
+  print cursor_line, WhodisSourceData.disasm_to_source_line[cursor_line - 1]
+  # TODO: Set underline on the source file line that corresponds to the disasm
+  # where the cursor is. Currently, there's 12 highlight groups, so all lines
+  # corresponding to the same % 12 group would get underlined. Instead, make
+  # N groups with repeating colours so that underline can be set independently.
+  '''
+  right_now_window = vim.current.window
+
+  vim.current.window = WhodisIsOpen[1]
+  if cursor_line not in WhodisSourceData.disasm_to_source_line:
+    WhodisIsOpen
+    _CreateHighlightGroups
+  print 'source line', WhodisSourceData.disasm_to_source_line[cursor_line - 1]
+
+  vim.current.window = right_now_window
+  '''
+
+
 def Whodis():
   """If not open, looks at current buffer/line and attempts to disasm that
   function and display it in a new buffer. If it is open, closes the old buffer.
   """
 
   global WhodisIsOpen
+  global WhodisSourceData
   if WhodisIsOpen:
     # Restore the syntax highlighting on the original source window we overrode
     # the highlighting on. Save the now-current window because we have to modify
@@ -291,10 +342,11 @@ def Whodis():
 
     # Remove the global that indicates that we were open.
     WhodisIsOpen = None
+    WhodisSourceData = None
     return
 
   name = vim.current.buffer.name
-  compdb = LoadCompdb(FindCompdbForFile(name))
+  compdb = _LoadCompdb(_FindCompdbForFile(name))
   cwd, command, output = compdb[name]
 
   # Hackity hack to blah.o.S and append -S assuming that'll get us asm.
@@ -309,15 +361,15 @@ def Whodis():
   with open(temp_asm, 'rb') as f:
     asm_contents = [x.rstrip() for x in f.readlines()]
   file_lines = [x[7:] for x in asm_contents if x.startswith('\t.file\t')]
-  tu_index = FindIndexForFile(cwd, file_lines, name)
+  tu_index = _FindIndexForFile(cwd, file_lines, name)
 
-  line_index = GetDesiredLine(asm_contents, tu_index)
+  line_index = _GetDesiredLine(asm_contents, tu_index)
 
-  # Below GetDesiredLine() which raises if not found.
-  function_start = FindFunctionStart(asm_contents, line_index)
-  function_end = FindFunctionEnd(asm_contents, line_index)
+  # Below _GetDesiredLine() which raises if not found.
+  function_start = _FindFunctionStart(asm_contents, line_index)
+  function_end = _FindFunctionEnd(asm_contents, line_index)
 
-  contents = DropMiscDirectives(asm_contents[function_start:function_end + 1])
+  contents = _DropMiscDirectives(asm_contents[function_start:function_end + 1])
 
   filter_prog = vim.vars['WhodisFilterProgram']
   if filter_prog:
@@ -325,26 +377,29 @@ def Whodis():
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     contents = p.communicate('\n'.join(contents))[0].splitlines(False)
 
-  contents_and_colours, colour_map = ReplaceLocWithCode(cwd, contents, tu_index)
+  source_data = _BuildSourceData(cwd, contents, tu_index)
 
-  buf, scratch_window, original_window = EnsureScratchBufferOpen()
+  buf, scratch_window, original_window = _EnsureScratchBufferOpen()
   buf.options['buftype'] = 'nofile'
   buf.options['bufhidden'] = 'hide'
   buf.options['swapfile'] = False
   buf.options['ts'] = 8
   buf.options['modifiable'] = True
-  buf[:] = [x[0] for x in contents_and_colours]
+  buf.vars['updatetime'] = 500
+  buf[:] = source_data.contents
   buf.options['modifiable'] = False
+  vim.command('autocmd CursorHold ' + buf.name +
+              ' python _UpdateSourceUnderlining()')
 
   buf.options['ft'] = 'asm'
   vim.command('syn on')
-  CreateHighlightGroups()
-  AssignDisasmColours(contents_and_colours)
+  _CreateHighlightGroups()
+  _AssignDisasmColours(source_data)
   buf.options['ft'] = ''
 
   vim.current.window = original_window
-  CreateHighlightGroups()
-  AssignOriginalColours(colour_map)
+  _CreateHighlightGroups()
+  _AssignOriginalColours(source_data)
   vim.command('syn clear cStatement cppStatement cString cCppString')
   vim.command('syn clear cConditional cRepeat cStorageClass cppStorageClass')
   vim.command('syn clear cType cOperator cLabel cppType cppBoolean')
@@ -354,6 +409,7 @@ def Whodis():
 
   # Save that we're open (existence), and original windows for fixup.
   WhodisIsOpen = buf, original_window
+  WhodisSourceData = source_data
 endpython
 
 execute 'map <silent>' . WhodisKey . ' :python Whodis()<cr>'
