@@ -21,6 +21,10 @@ if !exists('g:WhodisFilterProgram')
   let WhodisFilterProgram = ''
 endif
 
+if !exists('g:WhodisHoverAttribute')
+  let WhodisHoverAttribute = 'bold'
+endif
+
 python <<endpython
 import json
 import os
@@ -94,7 +98,8 @@ def _FindLineContainingCursor(asm_contents, tu_index, line_number):
 
 def _FindFunctionStart(asm_contents, start_index):
   i = start_index - 1
-  while not asm_contents[i].startswith('Lfunc_begin'):
+  while (not asm_contents[i].startswith('Lfunc_begin') and
+         not asm_contents[i].startswith('.Lfunc_begin')):
     i -= 1
   # After Lfunc_begin, try to walk back to actual function symbol.
   i -= 1
@@ -105,7 +110,8 @@ def _FindFunctionStart(asm_contents, start_index):
 
 def _FindFunctionEnd(asm_contents, start_index):
   i = start_index + 1
-  while not asm_contents[i].startswith('Lfunc_end'):
+  while (not asm_contents[i].startswith('Lfunc_end') and
+         not asm_contents[i].startswith('.Lfunc_end')):
     i += 1
   return i
 
@@ -267,7 +273,7 @@ def _GetDesiredLine(asm_contents, tu_index):
   return line_index
 
 
-def _CreateHighlightGroups(source_data, note_index=-1):
+def _CreateHighlightGroups(source_data, note_group=-1):
   # http://colorbrewer2.org/?type=qualitative&scheme=Set3&n=12
   # Mapped to xterm256 via misc/map_to_xterm256.py.
   colours = [
@@ -285,6 +291,7 @@ def _CreateHighlightGroups(source_data, note_index=-1):
     ('ffed6f', 227),
   ]
 
+  attr = vim.vars['WhodisHoverAttribute']
   def make_group(i, guibg, ctermbg):
     vim.command('highlight clear WhodisLineGroup' + str(i))
     # TODO: bold looks better than underline, but requires that the font in use
@@ -292,24 +299,27 @@ def _CreateHighlightGroups(source_data, note_index=-1):
     # instead of bold and/or disable this entirely.
     vim.command('highlight WhodisLineGroup' + str(i) + ' guibg=#' + guibg +
                 ' guifg=black ctermbg=' + str(ctermbg) + ' ctermfg=0' +
-                (' gui=bold term=bold' if note_index == i else ''))
+                (' gui=' + attr + ' cterm=' + attr if note_group == i else ''))
   for line_number, group in source_data.source_line_to_colour_group.iteritems():
     colour_index = group % len(colours)
     make_group(group, colours[colour_index][0], colours[colour_index][1])
 
 
-def _UpdateSourceUnderlining():
+def _UpdateSourceHover():
   global WhodisSourceData
   if not WhodisSourceData:
     return
 
-  cursor_line = vim.current.window.cursor[0]
-  colour_group = WhodisSourceData.disasm_to_colour_group[cursor_line - 1]
+  try:
+    cursor_line = vim.current.window.cursor[0]
+    colour_group = WhodisSourceData.disasm_to_colour_group[cursor_line - 1]
 
-  right_now_window = vim.current.window
-  vim.current.window = WhodisIsOpen[1]
-  _CreateHighlightGroups(WhodisSourceData, colour_group)
-  vim.current.window = right_now_window
+    right_now_window = vim.current.window
+    vim.current.window = WhodisIsOpen[1]
+    _CreateHighlightGroups(WhodisSourceData, colour_group)
+    vim.current.window = right_now_window
+  except:
+    print 'internal error: updating source hover'
 
 
 def Whodis():
@@ -374,7 +384,11 @@ def Whodis():
   if filter_prog:
     p = subprocess.Popen([filter_prog],
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    contents = p.communicate('\n'.join(contents))[0].splitlines(False)
+    new_contents = p.communicate('\n'.join(contents))[0].splitlines(False)
+    if p.returncode != 0:
+      print 'WhodisFilterProgram ' + filter_prog + ' returned non-zero'
+    else:
+      contents = new_contents
 
   source_data = _BuildSourceData(cwd, contents, tu_index)
 
@@ -387,8 +401,7 @@ def Whodis():
   buf.vars['updatetime'] = 500
   buf[:] = source_data.contents
   buf.options['modifiable'] = False
-  vim.command('autocmd CursorHold ' + buf.name +
-              ' python _UpdateSourceUnderlining()')
+  vim.command('autocmd CursorHold ' + buf.name + ' python _UpdateSourceHover()')
 
   buf.options['ft'] = 'asm'
   vim.command('syn on')
@@ -402,7 +415,7 @@ def Whodis():
   vim.command('syn clear cStatement cppStatement cString cCppString')
   vim.command('syn clear cConditional cRepeat cStorageClass cppStorageClass')
   vim.command('syn clear cType cOperator cLabel cppType cppBoolean')
-  vim.command('syn clear cConstant cppConstant')
+  vim.command('syn clear cConstant cppConstant cBlock')
 
   vim.current.window = scratch_window
 
