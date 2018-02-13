@@ -127,7 +127,7 @@ def _EnsureScratchBufferOpen():
 
   # Check if a buffer is already created.
   buf = find_in_buffers()
-  if buf is not None:
+  if buf is None:
     vim.command('vnew ' + TEMP_BUFFER_NAME)
   else:
     # Buffer is already created, check if there's a window.
