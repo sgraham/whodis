@@ -25,7 +25,11 @@ original source file. On Mac, use `Cmd-Shift-A` instead. This mapping can be
 overridden by setting `g:WhodisKey` in your .vimrc.
 
 Line attribution is done by colour, so you can visually see which lines
-correspond to which instructions. This works in GUI and xterm256.
+correspond to which instructions. This works in GUI and xterm256. When the
+cursor is positioned on a coloured disassembly line, the associated source will
+be marked as bold to more easily correlate source with disassembly. This is
+accomplished by setting a Vim highlight attribute, which can be customized by
+setting 'g:WhodisHoverAttribute', for example to 'underline', or 'none'.
 
 A lot of directives and miscellaneous annotations are stripped out to try to
 make the disassembly more readable, so if you're looking for something more than
