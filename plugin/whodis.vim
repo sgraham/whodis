@@ -215,7 +215,10 @@ def _BuildSourceData(cwd, contents, tu_index):
   current_colour = -1
   for line in contents:
     if line.startswith('\t.loc\t'):
-      trailing_filename = line[line.find('#'):].lstrip('# ')
+      comment_start = line.find('#')
+      if comment_start == -1:
+        comment_start = line.find('//')
+      trailing_filename = line[comment_start:].lstrip('#/').lstrip(' ')
       mo = re.match(r'\t\.loc\t(\d+)', line)
       file_name, line_number = _GetFileNameAndLineNumber(trailing_filename)
 
@@ -363,8 +366,9 @@ def Whodis():
   # output for what we want to do here.
   output_to_find = os.path.relpath(output, cwd)
   temp_asm = os.path.join(cwd, 'whodis.temp.S')
-  command_to_run = command.replace(output_to_find, temp_asm) + \
-                  ' -S -g -masm=intel'
+  command_to_run = command.replace(output_to_find, temp_asm) + ' -S -g'
+  if '--target=aarch64' not in command_to_run:
+    command_to_run += ' -masm=intel'
   subprocess.check_call(shlex.split(command_to_run), cwd=cwd)
 
   with open(temp_asm, 'rb') as f:
