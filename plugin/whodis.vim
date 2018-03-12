@@ -59,22 +59,33 @@ def _FindCompdbForFile(f):
     f = cur_dir
 
 
-def _LoadCompdb(compdb_path):
+def _LoadCompdb(compdb_path, wanted_path):
   with open(compdb_path, 'rb') as f:
     commands = json.loads(f.read())
-  result = {}
   for c in commands:
     path = os.path.normpath(os.path.join(c['directory'], c['file']))
+    if path != wanted_path:
+      continue
     if 'output' in c:
       output = os.path.normpath(os.path.join(c['directory'], c['output']))
     else:
       split_cmd = shlex.split(c['command'])
-      o_index = split_cmd.index('-o')
-      assert o_index != -1
-      output = os.path.normpath(
-          os.path.join(c['directory'], split_cmd[o_index + 1]))
-    result[path] = c['directory'], c['command'], output
-  return result
+      o_file = None
+      is_cl = False
+      try:
+        o_index = split_cmd.index('-o')
+        o_file = split_cmd[o_index + 1]
+      except ValueError:
+        # '-o' not found in split_cmd.
+        # Maybe it's cl.exe, look for /Fo instead:
+        for part in split_cmd:
+          if part.startswith('/Fo'):
+            o_file = part[3:]
+            is_cl = True
+            break
+      assert o_file
+      output = os.path.normpath(os.path.join(c['directory'], o_file))
+    return c['directory'], c['command'], output, is_cl
 
 
 def _FindIndexForFile(cwd, file_directives, filename):
@@ -358,22 +369,32 @@ def Whodis():
     return
 
   name = vim.current.buffer.name
-  compdb = _LoadCompdb(_FindCompdbForFile(name))
-  cwd, command, output = compdb[name]
+  cwd, command, output, is_cl = _LoadCompdb(_FindCompdbForFile(name), name)
 
   # Hackity hack to blah.o.S and append -S assuming that'll get us asm.
   # Another way might be to use gobjdump -S, but it seems like not perfect
   # output for what we want to do here.
-  output_to_find = os.path.relpath(output, cwd)
   temp_asm = os.path.join(cwd, 'whodis.temp.S')
-  command_to_run = command.replace(output_to_find, temp_asm) + ' -S -g'
-  if '--target=aarch64' not in command_to_run:
-    command_to_run += ' -masm=intel'
+  if is_cl:
+    command_to_run = command.replace('/showIncludes', '')
+    #command_to_run = command_to_run.replace('-m32', '')
+    command_to_run = command_to_run.replace('/Yubuild/precompile.h', '')
+    command_to_run = command_to_run.replace('/Fpobj/chrome/test/unit_tests_cc.pch', '')
+    command_to_run += ' /FA /Z7 /Fa' + temp_asm  # /FA defaults to intel.
+    open('foo.sh', 'w').write(command_to_run);
+  else:
+    output_to_find = os.path.relpath(output, cwd)
+    command_to_run = command.replace(output_to_find, temp_asm) + ' -S -g'
+    if '--target=aarch64' not in command_to_run:
+      command_to_run += ' -masm=intel'
   subprocess.check_call(shlex.split(command_to_run), cwd=cwd)
 
   with open(temp_asm, 'rb') as f:
     asm_contents = [x.rstrip() for x in f.readlines()]
-  file_lines = [x[7:] for x in asm_contents if x.startswith('\t.file\t')]
+  if is_cl:
+    file_lines = [x[10:] for x in asm_contents if x.startswith('\t.cv_file\t')]
+  else:
+    file_lines = [x[7:] for x in asm_contents if x.startswith('\t.file\t')]
   tu_index = _FindIndexForFile(cwd, file_lines, name)
 
   line_index = _GetDesiredLine(asm_contents, tu_index)
